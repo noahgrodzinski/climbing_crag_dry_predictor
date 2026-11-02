@@ -15,9 +15,20 @@ export const ROCK = {
   // Wmax: surface film that counts as fully wet. Dmax: deep store capacity.
   // kin: fraction of rain soaking into deep store. tauD: drain time (h).
   // kw: wick rate back to surface when deep store is over half full (mm/h).
-  grit:     { Wmax: 0.5, Dmax: 5, kin: 0.25, tauD: 72, kw: 0.05 },
-  quarried: { Wmax: 0.5, Dmax: 6, kin: 0.30, tauD: 96, kw: 0.06 },
+  // fragile: wet rock is weaker (grit/sandstone) rather than just slippery.
+  grit:      { Wmax: 0.5, Dmax: 5,  kin: 0.25, tauD: 72,  kw: 0.05, fragile: true },
+  quarried:  { Wmax: 0.5, Dmax: 6,  kin: 0.30, tauD: 96,  kw: 0.06, fragile: true },
+  // Mountain volcanic rock: sheds water fast but drainage lines seep for days.
+  rhyolite:  { Wmax: 0.5, Dmax: 12, kin: 0.35, tauD: 200, kw: 0.08, fragile: false },
+  // Tremadog: famously quick drying.
+  dolerite:  { Wmax: 0.4, Dmax: 4,  kin: 0.20, tauD: 48,  kw: 0.04, fragile: false },
+  // Gogarth sea cliffs: seepage after wet spells.
+  quartzite: { Wmax: 0.5, Dmax: 10, kin: 0.30, tauD: 150, kw: 0.07, fragile: false },
+  // Pembroke/Gower: surface dries fast, seepage after prolonged rain.
+  limestone: { Wmax: 0.4, Dmax: 10, kin: 0.35, tauD: 150, kw: 0.06, fragile: false },
 };
+
+const SEEP = { low: 0.5, med: 1, high: 2 };
 
 export const THRESH = { dry: 0.08, damp: 0.35, rain: 0.2 };
 
@@ -100,7 +111,7 @@ export function step(s, x, crag) {
   // Deep store: soaks up some rain, drains, and wicks back to the surface when full.
   const fill = s.D / r.Dmax;
   const soak = r.kin * x.P * (1 - fill);
-  const wick = r.kw * Math.max(0, fill - 0.5) * 2 * crag.green;
+  const wick = r.kw * Math.max(0, fill - 0.5) * 2 * crag.green * (SEEP[crag.seepage] ?? 1);
   s.D = Math.max(0, s.D + soak - s.D / r.tauD - wick - 0.1 * E * fill);
 
   s.W = Math.min(r.Wmax, s.W + x.P + cond + wick);
@@ -117,7 +128,7 @@ export function friction(h, x) {
   const Td = dewPoint(x.T, x.RH);
   let f = 1;
   f -= 0.6 * clamp((h.Tr - 12) / 12);
-  f -= 0.5 * clamp((x.RH - 60) / 35);
+  f -= 0.5 * clamp((x.RH - 55) / 35);
   f -= 0.3 * clamp((Td - 8) / 8);
   f += 0.1 * Math.min(h.u, 4) / 4;
   if (h.Tr < 2) f -= 0.15;
@@ -128,9 +139,19 @@ export function friction(h, x) {
 export const frictionLabel = f =>
   f > 0.8 ? 'prime' : f > 0.6 ? 'good' : f > 0.4 ? 'ok' : f > 0.2 ? 'greasy' : 'poor';
 
-// Damage risk: wet surface = don't; saturated pores or freezing wet rock = go gentle.
-export function damage(h, x) {
-  if (h.state === 2) return 2;
-  if (h.fill > 0.6 || (x.T < 0.5 && (h.fill > 0.3 || h.w > THRESH.dry))) return 1;
-  return 0;
+// First light / sunrise / sunset / last light for a UTC calendar day (unix seconds or null).
+// Civil twilight (sun 6° below horizon) is when it's light enough to climb without a torch.
+export function sunTimes(dateStr, lat, lon) {
+  const t0 = Date.UTC(+dateStr.slice(0, 4), +dateStr.slice(5, 7) - 1, +dateStr.slice(8, 10)) / 1000;
+  const out = { dawn: null, rise: null, set: null, dusk: null };
+  let prev = sunPos(t0, lat, lon).zen;
+  for (let t = t0 + 60; t <= t0 + 86400; t += 60) {
+    const z = sunPos(t, lat, lon).zen;
+    if (prev > 96 && z <= 96) out.dawn = t;
+    if (prev > 90.833 && z <= 90.833) out.rise = t;
+    if (prev <= 90.833 && z > 90.833) out.set = t;
+    if (prev <= 96 && z > 96) out.dusk = t;
+    prev = z;
+  }
+  return out;
 }
