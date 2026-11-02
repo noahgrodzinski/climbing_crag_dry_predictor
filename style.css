@@ -151,3 +151,20 @@ select {
   .card .row, .card .best { font-size: 12px; }
   .dayrow > button { grid-template-columns: 4.4em 1fr auto; gap: 0 8px; }
 }
+
+/* condition reports */
+.report { margin-top: 14px; padding: 12px; background: var(--card); border: 1px solid var(--rule); border-radius: 10px; font-size: 13.5px; }
+.report p { margin: 4px 0; }
+.report .q { margin-bottom: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
+.chip, .chipbtn {
+  font: inherit; font-size: 14px; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--rule); border-radius: 999px; padding: 7px 12px; cursor: pointer; min-height: 36px;
+}
+.chip.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.chipbtn { border-radius: 8px; font-weight: 700; }
+.chipbtn[disabled] { opacity: 0.4; cursor: default; }
+.report input {
+  font: inherit; font-size: 16px; width: 100%; margin-top: 4px; padding: 8px 10px;
+  color: var(--fg); background: var(--bg); border: 1px solid var(--rule); border-radius: 8px;
+}

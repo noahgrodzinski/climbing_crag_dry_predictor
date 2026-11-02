@@ -1,5 +1,6 @@
 import { CRAGS, REGIONS, GROUPS } from './crags.js';
 import { fetchRegion, runRegion, dayList, summarise, localParts, lightTimes, pickScore } from './forecast.js';
+import { REPORT_URL, MODEL_VERSION } from './config.js';
 
 const SESSIONS = {
   day: { label: 'Daytime (10am–6pm)', hours: [10, 18] },
@@ -211,6 +212,7 @@ function renderCrag({ runs, days }) {
     </div>`;
   });
   html += '</div><p class="dim" style="font-size:12px">Tap a day for hour-by-hour detail. More than 3 days ahead, treat it as a rough guide.</p>';
+  html += reportForm(c);
   $('cragView').innerHTML = html;
 }
 
@@ -290,6 +292,77 @@ function detail(run, s, d, k) {
   </div>`;
 }
 
+// ---------- condition reports ----------
+// Ground truth for checking the model: what people actually found at the crag.
+
+const REPORT_Q = [
+  ['face', 'The rock', [['dry', 'Dry'], ['patchy', 'Damp patches'], ['wet', 'Wet']]],
+  ['cracks', 'Cracks', [['dry', 'Dry'], ['damp', 'Damp'], ['seeping', 'Seeping'], ['na', "Didn't check"]]],
+  ['conditions', 'Conditions', [['prime', 'Prime'], ['good', 'Good'], ['average', 'Average'], ['greasy', 'Greasy']]],
+];
+const report = { open: false, ans: {}, sent: null };
+
+function reportForm(c) {
+  const today = localParts(Date.now() / 1000).date;
+  const yest = localParts(Date.now() / 1000 - 86400).date;
+  if (report.sent === c.id) return `<div class="report"><p><b>Thanks!</b> Report saved${REPORT_URL ? ' and sent' : ' on this phone'}. It helps tune the model.</p>
+    <p class="dim">${myReports().length} report(s) from this device · <button class="linkish" id="dlReports">download CSV</button></p></div>`;
+  if (!report.open) return `<div class="report"><button class="chipbtn" id="openReport">Been to ${esc(c.sector || c.crag)}? Report conditions</button></div>`;
+  const chips = ([key, label, opts]) => `<div class="q"><div class="dim">${label}</div><div class="chips">${
+    opts.map(([v, t]) => `<button class="chip${report.ans[key] === v ? ' on' : ''}" data-q="${key}" data-v="${v}">${t}</button>`).join('')}</div></div>`;
+  return `<div class="report">
+    <div class="q"><div class="dim">When</div><div class="chips">
+      <button class="chip${(report.ans.date ?? today) === today ? ' on' : ''}" data-q="date" data-v="${today}">Today</button>
+      <button class="chip${report.ans.date === yest ? ' on' : ''}" data-q="date" data-v="${yest}">Yesterday</button></div></div>
+    <div class="q"><div class="dim">Roughly what time</div><div class="chips">
+      ${[['am', 'Morning'], ['pm', 'Afternoon'], ['eve', 'Evening']].map(([v, t]) =>
+        `<button class="chip${report.ans.time === v ? ' on' : ''}" data-q="time" data-v="${v}">${t}</button>`).join('')}</div></div>
+    ${REPORT_Q.map(chips).join('')}
+    <div class="q"><div class="dim">Anything else? (optional)</div>
+      <input id="repNote" maxlength="200" placeholder="e.g. green at the back of Hollyash, rest fine" value="${esc(report.ans.note || '')}"></div>
+    <div class="chips"><button class="chipbtn" id="sendReport"${report.ans.face ? '' : ' disabled'}>Send report</button>
+      <button class="linkish dim" id="cancelReport">cancel</button></div>
+  </div>`;
+}
+
+function myReports() { return store.get('reports', []); }
+
+async function sendReport() {
+  const c = selected();
+  const data = cache[ui.region];
+  const run = data.runs.find(r => r.crag.id === c.id);
+  const date = report.ans.date ?? localParts(Date.now() / 1000).date;
+  const hours = { am: [8, 12], pm: [12, 17], eve: [16, 20] }[report.ans.time] ?? SESSIONS[ui.session].hours;
+  const s = summarise(run, date, hours);
+  const rec = {
+    reported_at: new Date().toISOString(), date, time: report.ans.time ?? '',
+    crag_id: c.id, crag: c.crag, sector: c.sector ?? '',
+    face: report.ans.face, cracks: report.ans.cracks ?? '', conditions: report.ans.conditions ?? '',
+    note: ($('repNote')?.value ?? '').slice(0, 200),
+    pred_face: s?.p != null ? +s.p.toFixed(2) : '', pred_cracks: s?.pCrack != null ? +s.pCrack.toFixed(2) : '',
+    pred_conditions: s?.grip != null ? +s.grip.toFixed(2) : '', pred_hours: hours.join('-'), model: MODEL_VERSION,
+  };
+  store.set('reports', [...myReports(), rec]);
+  if (REPORT_URL) {
+    // no-cors: Apps Script doesn't send CORS headers; the request still lands.
+    try { await fetch(REPORT_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(rec) }); }
+    catch (e) { console.warn('report send failed', e); }
+  }
+  report.sent = c.id; report.open = false; report.ans = {};
+  renderCrag(cache[ui.region]);
+}
+
+function downloadReports() {
+  const rows = myReports();
+  if (!rows.length) return;
+  const cols = Object.keys(rows[0]);
+  const csv = [cols.join(','), ...rows.map(r => cols.map(k => `"${String(r[k] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = 'isitdry-reports.csv';
+  a.click();
+}
+
 function renderAll({ runs, days }) {
   const cur = selected();
   let html = '<table><thead><tr><th></th>' + days.map((d, k) =>
@@ -347,6 +420,7 @@ function renderData() {
 
 function choose(id, scroll) {
   ui.sel[ui.region] = id;
+  report.open = false; report.ans = {}; report.sent = null;
   store.set('sel', ui.sel);
   renderPickers();
   renderData();
@@ -360,6 +434,18 @@ $('sector').onchange = e => choose(e.target.value, false);
 $('allWrap').ontoggle = () => { if ($('allWrap').open && cache[ui.region]) renderAll(cache[ui.region]); };
 
 document.addEventListener('click', e => {
+  const t = e.target;
+  if (t.id === 'openReport') { report.open = true; report.sent = null; renderCrag(cache[ui.region]); return; }
+  if (t.id === 'cancelReport') { report.open = false; report.ans = {}; renderCrag(cache[ui.region]); return; }
+  if (t.id === 'sendReport') { report.ans.note = $('repNote')?.value; sendReport(); return; }
+  if (t.id === 'dlReports') { downloadReports(); return; }
+  const chip = t.closest('button[data-q]');
+  if (chip) {
+    report.ans.note = $('repNote')?.value;
+    report.ans[chip.dataset.q] = chip.dataset.v;
+    renderCrag(cache[ui.region]);
+    return;
+  }
   const pick = e.target.closest('[data-pick]');
   if (pick) { choose(pick.dataset.pick, true); return; }
   const day = e.target.closest('button[data-day]');

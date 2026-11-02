@@ -44,3 +44,9 @@ python3 -m http.server 8765
 ```
 
 Then open http://localhost:8765.
+
+## Condition reports
+
+Each crag has a "Report conditions" form. It records what people found (face, cracks, conditions)
+next to what the model predicted for that crag, date and time of day. Reports go to a Google Sheet
+via a small Apps Script; see `apps-script/README.md`.
