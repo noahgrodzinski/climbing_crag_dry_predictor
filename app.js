@@ -89,6 +89,14 @@ function whenText(s) {
   return 'Not expected to dry';
 }
 
+function crackText(s) {
+  if (s.pCrack == null) return null;
+  if (s.pCrack >= 0.6) return ['v4', '<b>dry</b>'];
+  if (s.seepH) return [s.pCrack >= 0.35 ? 'v2' : 'v0', `<b>seeping</b> — the rock is still draining after a wet spell; expect wet cracks, breaks and drainage streaks`];
+  if (s.pCrack >= 0.35) return ['v2', '<b>may be damp at the back</b> — cracks dry slower than the face'];
+  return ['v1', '<b>still damp</b> — cracks hold water long after the face dries'];
+}
+
 function rockText(s) {
   if (s.rockState === 'wet') return s.fragile
     ? ['v0', "<b>wet — leave it.</b> Wet grit is weak; holds and flakes snap."]
@@ -196,7 +204,7 @@ function renderCrag({ runs, days }) {
     html += `<div class="dayrow${open ? ' open' : ''}">
       <button data-day="${d}" aria-expanded="${open}">
         <span class="dname">${dayName(d, k)}<small>${dateNum(d)}${isWeekend(d) ? ' · wknd' : ''}</small></span>
-        <span class="line">${verdictHTML(s.p)}<br><span class="sub">${whenText(s)}${cond && s.rockState !== 'wet' ? ` · ${cond} conditions` : ''}${c.weekday_closed && !isWeekend(d) ? ' · ⚠︎ range may be firing' : ''}</span></span>
+        <span class="line">${verdictHTML(s.p)}<br><span class="sub">${whenText(s)}${cond && s.rockState !== 'wet' ? ` · ${cond} conditions` : ''}${s.p >= 0.6 && s.pCrack != null && s.pCrack < 0.4 ? (s.seepH ? ' · seeping' : ' · damp cracks') : ''}${c.weekday_closed && !isWeekend(d) ? ' · ⚠︎ range may be firing' : ''}</span></span>
         <span class="wxcol">${em(e, lab)} ${Math.round(s.tmax)}°<br><span class="sub">${Math.round(s.wind)} km/h</span></span>
       </button>
       ${open ? detail(run, s, d, k) : ''}
@@ -206,23 +214,22 @@ function renderCrag({ runs, days }) {
   $('cragView').innerHTML = html;
 }
 
-// Monochrome weather symbol for one hour: rain chance from the ensemble, the rest from
-// the main model's weather code and our mist estimate.
+// Weather emoji for one hour: rain chance from the ensemble, the rest from the main
+// model's weather code and our mist estimate.
 function hourSymbol(run, i, dark) {
   const x = run.det[i].x, pr = run.pRain[i] ?? 0, c = x.code;
-  if (c >= 95) return ['ϟ', 'thunder'];
-  if ((c >= 71 && c <= 77) || c === 85 || c === 86) return ['❄︎', 'snow'];
-  if (pr >= 0.5) return ['☂︎', `rain likely (${Math.round(pr * 100)}%)`];
-  if (x.fog >= 0.5) return ['≡', 'mist / low cloud'];
-  if (pr >= 0.25) return ['<span class="faint">☂︎</span>', `chance of rain (${Math.round(pr * 100)}%)`];
-  if (c <= 1) return dark ? ['☾', 'clear'] : ['☀︎', 'sunny'];
-  if (c === 2) return dark ? ['☾', 'partly cloudy'] : ['<span class="faint">☀︎</span>', 'sunny spells'];
-  return ['☁︎', 'cloudy'];
+  if (c >= 95) return ['⛈️', 'thunder'];
+  if ((c >= 71 && c <= 77) || c === 85 || c === 86) return ['🌨️', 'snow'];
+  if (pr >= 0.5) return ['🌧️', `rain likely (${Math.round(pr * 100)}%)`];
+  if (x.fog >= 0.5) return ['🌫️', 'mist / low cloud'];
+  if (pr >= 0.25) return [dark ? '🌧️' : '🌦️', `chance of rain (${Math.round(pr * 100)}%)`];
+  if (c <= 1) return dark ? ['🌙', 'clear'] : ['☀️', 'sunny'];
+  if (c === 2) return dark ? ['🌙', 'partly cloudy'] : ['🌤️', 'sunny spells'];
+  return ['☁️', 'cloudy'];
 }
 
 function detail(run, s, d, k) {
   const c = run.crag;
-  const [h0, h1] = SESSIONS[ui.session].hours;
   const lt = lightTimes(run, d);
   let cells = '', ticks = '';
   for (let hr = STRIP[0]; hr < STRIP[1]; hr++) {
@@ -235,9 +242,9 @@ function detail(run, s, d, k) {
       dark = (Math.max(0, Math.min(t + 3600, lt.dawn) - t) + Math.max(0, t + 3600 - Math.max(t, lt.dusk))) / 3600;
     }
     const [sym, what] = h ? hourSymbol(run, h.i, dark >= 0.5) : ['', ''];
-    const cls = ['hc', hr < h0 || hr >= h1 ? 'out' : '', dark >= 0.75 ? 'night' : dark > 0.25 ? 'dusk' : ''].join(' ');
+    const cls = ['hc', dark >= 0.75 ? 'night' : dark > 0.25 ? 'dusk' : ''].join(' ');
     const tip = `${ampm(hr)}: ${what}${p == null ? '' : ', rock ' + verdict(p).word.toLowerCase()}`;
-    cells += `<span class="${cls}" title="${esc(tip)}"><i>${sym}</i>${p == null ? '<span class="dot"></span>' : dotHTML(p)}</span>`;
+    cells += `<span class="${cls}" title="${esc(tip)}"><i class="emoji">${sym}</i>${p == null ? '<span class="dot"></span>' : dotHTML(p)}</span>`;
     ticks += `<span>${hr % 3 === 0 ? ampm(hr) : ''}</span>`;
   }
 
@@ -265,6 +272,8 @@ function detail(run, s, d, k) {
   if (s.grip != null && s.rockState !== 'wet') facts.push(['friction', `<b>${condWord(s.grip)}</b> when dry`]);
   const [rc2, rt] = rockText(s);
   facts.push(['rock', `<span class="${rc2}">${rt}</span>`]);
+  const ct = crackText(s);
+  if (ct && s.rockState !== 'wet') facts.push(['cracks', `<span class="${ct[0]}">${ct[1]}</span>`]);
   if (s.tide) {
     const ts = type => s.tide.ext.filter(x => x.type === type).map(x => '~' + ampm(localParts(x.t).hour)).join(' & ') || '–';
     const w = s.tide.wave;
@@ -275,8 +284,7 @@ function detail(run, s, d, k) {
 
   return `<div class="detail">
     <div class="strip"><div class="hours">${cells}</div><div class="ticks">${ticks}</div>
-    <div class="cap">top: weather (☀︎ sun · ☁︎ cloud · ☂︎ rain · ≡ mist · ☾ night) · bottom: rock
-    (<span class="dot v4"></span>dry <span class="dot v2"></span>50/50 <span class="dot v0"></span>wet) · faded = outside your session</div></div>
+    <div class="cap">top: weather · bottom: rock face (<span class="dot v4"></span>dry <span class="dot v2"></span>50/50 <span class="dot v0"></span>wet) · dark = night</div></div>
     <dl class="facts">${facts.map(([l, t]) => `<dt>${l}</dt><dd>${t}</dd>`).join('')}</dl>
     ${k >= 3 ? '<p class="dim" style="font-size:12px;margin:8px 0 0">This far out the forecast can still change a lot.</p>' : ''}
   </div>`;
@@ -311,6 +319,7 @@ function renderHowto() {
       <dt>sun</dt><dd>hours of sun actually on the face, not just in the sky</dd>
       <dt>wind</dt><dd>dries rock fast; arrow shows where it's blowing to; "in the lee" = sheltered</dd>
       <dt>air</dt><dd>humidity: muggy air dries rock slowly and makes it greasy</dd>
+      <dt>cracks</dt><dd>cracks, breaks and the backs of chimneys dry about half as fast as open faces, collect run-off, and seep after a wet spell</dd>
       <dt>rock</dt><dd>wet grit is weak and holds snap, so leave it; "saturated" or "seeping" = damp inside after a wet spell</dd>
       <dt>tide</dt><dd>approximate tide times and swell for sea cliffs</dd>
       <dt>light</dt><dd>first to last light; head torch outside that</dd>

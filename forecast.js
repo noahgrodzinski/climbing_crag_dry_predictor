@@ -125,11 +125,12 @@ export function runRegion(region, crags, wx) {
     if (E) {
       for (const m of E.members) {
         const st = new Uint8Array(n);
+        const cst = new Uint8Array(n);
         const rain = new Float32Array(n);
         let valid = n;
         const ms = { ...snap };
         for (let i = 0; i < n; i++) {
-          if (i <= nowIdx) { st[i] = det[i].d.state; rain[i] = det[i].x.P; continue; }
+          if (i <= nowIdx) { st[i] = det[i].d.state; cst[i] = det[i].d.cstate; rain[i] = det[i].x.P; continue; }
           const j = E.idx[t[i]];
           if (j == null || m.P[j] == null || m.G?.[j] == null) { valid = i; break; }
           const base = det[i].x;
@@ -138,12 +139,13 @@ export function runRegion(region, crags, wx) {
           const RH = m.RH?.[j] ?? base.RH;
           // Mist only where this member is also near-saturated.
           const fog = RH >= 96 ? base.fog : 0;
-          st[i] = step(ms, { P: m.P[j], T: base.T, RH, U: base.U, gt: fi.gt, fog }, cragParams(c)).state;
+          const o = step(ms, { P: m.P[j], T: base.T, RH, U: base.U, gt: fi.gt, fog }, cragParams(c));
+          st[i] = o.state; cst[i] = o.cstate;
         }
-        mem.push({ st, rain, valid });
+        mem.push({ st, cst, rain, valid });
       }
     }
-    if (!mem.length) mem = [{ st: Uint8Array.from(det.map(e => e.d.state)), rain: Float32Array.from(det.map(e => e.x.P)), valid: n }];
+    if (!mem.length) mem = [{ st: Uint8Array.from(det.map(e => e.d.state)), cst: Uint8Array.from(det.map(e => e.d.cstate)), rain: Float32Array.from(det.map(e => e.x.P)), valid: n }];
 
     const pDry = t.map((_, i) => {
       const ok = mem.filter(m => i < m.valid);
@@ -216,6 +218,9 @@ export function summarise(run, date, [h0, h1]) {
   const live = run.mem.filter(m => last < m.valid);
   const good = live.filter(m => idx.filter(i => m.st[i] === 0).length >= 0.75 * idx.length);
   const p = live.length ? good.length / live.length : null;
+  // Same test for the cracks (slower drying, fed by seepage).
+  const pCrack = live.length ? live.filter(m => idx.filter(i => m.cst[i] === 0).length >= 0.75 * idx.length).length / live.length : null;
+  const seepH = idx.filter(i => run.det[i].d.seeping).length;
   const rainChance = live.length ? live.filter(m => idx.reduce((a, i) => a + m.rain[i], 0) >= 0.5).length / live.length : null;
   const rainAmt = live.length ? live.reduce((a, m) => a + idx.reduce((b, i) => b + m.rain[i], 0), 0) / live.length : 0;
 
@@ -260,7 +265,7 @@ export function summarise(run, date, [h0, h1]) {
   const sunny = det.filter(e => e.x.G > 0).length ? mean(e => e.x.code <= 1 ? 1 : 0) : 0;
 
   return {
-    p, rainChance, rainAmt, when, grip, rockState, fragile: rock.fragile,
+    p, pCrack, seepH, rainChance, rainAmt, when, grip, rockState, fragile: rock.fragile,
     rain48, lastRain, sunH: sunHrs.length, sunFirst: sunHrs[0] ?? null,
     wind, gust, dir, faceWind, rh: mean(e => e.x.RH),
     tmin: Math.min(...det.map(e => e.x.T)), tmax: Math.max(...det.map(e => e.x.T)),

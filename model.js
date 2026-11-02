@@ -3,6 +3,8 @@
 //   W  surface film (mm)   filled by rain + condensation, emptied by evaporation
 //   D  deep/pore store (mm) filled slowly by rain, drains over days and wicks
 //                           back to the surface (green streaks, seepage, "saturated")
+//   C  crack film (mm)     like W but fed by run-off from the face above and by seepage
+//                           from D, and shaded/sheltered so it evaporates ~2x slower
 //
 // Evaporation is Penman for a wet surface, driven by sunlight on the actual
 // face (vertical plane at the crag's aspect), local wind and vapour-pressure deficit.
@@ -82,7 +84,7 @@ export function faceIrradiance(ghi, unix, lat, lon, aspect, shade = 1) {
   return { gt: shade * beam + (0.5 + 0.5 * shade) * diffuse, beam: shade * beam };
 }
 
-export function initState() { return { W: 0, D: 0, Tr: null }; }
+export function initState() { return { W: 0, D: 0, C: 0, Tr: null }; }
 
 // How much the crag is sitting in mist / low cloud this hour (0..1), from model visibility,
 // humidity, low cloud and fog/drizzle weather codes. Moorland edges catch "clag" that
@@ -132,9 +134,17 @@ export function step(s, x, crag) {
   s.W = Math.min(r.Wmax, s.W + x.P + cond + wick + dep);
   s.W = Math.max(0, s.W - E);
 
+  // Cracks: run-off from above, seepage once the rock is ~1/3 saturated, little sun or wind.
+  const Cmax = 1.2 * r.Wmax;
+  const seepC = 1.5 * r.kw * Math.max(0, fill - 0.3) / 0.7 * crag.green * (SEEP[crag.seepage] ?? 1);
+  s.C = Math.min(Cmax, s.C + 1.3 * x.P + 0.5 * dep + cond + seepC);
+  s.C = Math.max(0, s.C - 0.5 * E);
+  const wc = s.C / Cmax;
+  const cstate = x.P >= THRESH.rain || wc >= THRESH.damp ? 2 : wc >= THRESH.dry ? 1 : 0;
+
   const w = s.W / r.Wmax;
   const state = x.P >= THRESH.rain || w >= THRESH.damp ? 2 : w >= THRESH.dry ? 1 : 0;
-  return { state, w, fill: s.D / r.Dmax, E, cond, Tr: s.Tr, u, sweat: cond > 0.005, fog: (x.fog ?? 0) > 0 };
+  return { state, cstate, seeping: seepC > 0.01, w, fill: s.D / r.Dmax, E, cond, Tr: s.Tr, u, sweat: cond > 0.005, fog: (x.fog ?? 0) > 0 };
 }
 
 // Grit friction 0..1 from rock temp, humidity and breeze (only meaningful when dry).

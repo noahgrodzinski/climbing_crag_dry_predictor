@@ -115,14 +115,10 @@ select {
   padding: 3px 0 4px; border-radius: 4px; min-width: 0;
 }
 .strip .hc i {
-  font-style: normal; font-size: 17px; line-height: 18px; height: 18px; font-weight: 700;
-  font-family: "Segoe UI Symbol", "Apple Symbols", "DejaVu Sans", system-ui, sans-serif;
+  font-style: normal; font-size: 15px; line-height: 18px; height: 18px;
 }
-.strip .hc i .faint { opacity: 0.45; }
 .strip .hc .dot { margin: 0; width: 12px; height: 12px; }
-.strip .hc.out { opacity: 0.4; }
-.strip .hc.night { background: var(--nightbox); color: #d8d8e6; opacity: 1; }
-.strip .hc.night.out { opacity: 0.75; }
+.strip .hc.night { background: var(--nightbox); }
 .strip .hc.dusk { background: linear-gradient(180deg, transparent, var(--nightbox)); }
 .cap .dot { width: 10px; height: 10px; margin: 0 2px 0 4px; }
 .strip .ticks { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; }
