@@ -150,9 +150,14 @@ export function runRegion(region, crags, wx) {
       return ok.length ? ok.filter(m => m.st[i] === 0).length / ok.length : null;
     });
 
+    const pRain = t.map((_, i) => {
+      const ok = mem.filter(m => i < m.valid);
+      return ok.length ? ok.filter(m => m.rain[i] >= 0.1).length / ok.length : null;
+    });
+
     const daily = wx.det[ci].daily;
     const sun = Object.fromEntries(daily.time.map((u, k) => [localParts(u).date, { rise: daily.sunrise[k], set: daily.sunset[k] }]));
-    return { crag: c, t, det, mem, pDry, nowIdx, sun, marine: wx.marine?.[c.id] ?? null };
+    return { crag: c, t, det, mem, pDry, pRain, nowIdx, sun, marine: wx.marine?.[c.id] ?? null };
   });
 }
 

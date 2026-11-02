@@ -206,11 +206,25 @@ function renderCrag({ runs, days }) {
   $('cragView').innerHTML = html;
 }
 
+// Monochrome weather symbol for one hour: rain chance from the ensemble, the rest from
+// the main model's weather code and our mist estimate.
+function hourSymbol(run, i, dark) {
+  const x = run.det[i].x, pr = run.pRain[i] ?? 0, c = x.code;
+  if (c >= 95) return ['ϟ', 'thunder'];
+  if ((c >= 71 && c <= 77) || c === 85 || c === 86) return ['❄︎', 'snow'];
+  if (pr >= 0.5) return ['☂︎', `rain likely (${Math.round(pr * 100)}%)`];
+  if (x.fog >= 0.5) return ['≡', 'mist / low cloud'];
+  if (pr >= 0.25) return ['<span class="faint">☂︎</span>', `chance of rain (${Math.round(pr * 100)}%)`];
+  if (c <= 1) return dark ? ['☾', 'clear'] : ['☀︎', 'sunny'];
+  if (c === 2) return dark ? ['☾', 'partly cloudy'] : ['<span class="faint">☀︎</span>', 'sunny spells'];
+  return ['☁︎', 'cloudy'];
+}
+
 function detail(run, s, d, k) {
   const c = run.crag;
   const [h0, h1] = SESSIONS[ui.session].hours;
   const lt = lightTimes(run, d);
-  let bars = '', ticks = '';
+  let cells = '', ticks = '';
   for (let hr = STRIP[0]; hr < STRIP[1]; hr++) {
     const h = s.hours.find(x => x.hour === hr);
     const p = h ? run.pDry[h.i] : null;
@@ -220,10 +234,10 @@ function detail(run, s, d, k) {
     if (lt && t != null) {
       dark = (Math.max(0, Math.min(t + 3600, lt.dawn) - t) + Math.max(0, t + 3600 - Math.max(t, lt.dusk))) / 3600;
     }
-    const v = p != null ? verdict(p).v : null;
-    const cls = [v != null ? 'h' + v : '', hr < h0 || hr >= h1 ? 'out' : '', dark >= 0.75 ? 'night' : dark > 0.25 ? 'dusk' : ''].join(' ');
-    const fog = h && run.det[h.i].x.fog >= 0.5 ? ', clag' : '';
-    bars += `<span class="${cls}" title="${ampm(hr)}: ${p == null ? 'no data' : verdict(p).word}${fog}${dark >= 0.75 ? ', dark' : dark > 0.25 ? ', getting dark' : ''}"></span>`;
+    const [sym, what] = h ? hourSymbol(run, h.i, dark >= 0.5) : ['', ''];
+    const cls = ['hc', hr < h0 || hr >= h1 ? 'out' : '', dark >= 0.75 ? 'night' : dark > 0.25 ? 'dusk' : ''].join(' ');
+    const tip = `${ampm(hr)}: ${what}${p == null ? '' : ', rock ' + verdict(p).word.toLowerCase()}`;
+    cells += `<span class="${cls}" title="${esc(tip)}"><i>${sym}</i>${p == null ? '<span class="dot"></span>' : dotHTML(p)}</span>`;
     ticks += `<span>${hr % 3 === 0 ? ampm(hr) : ''}</span>`;
   }
 
@@ -260,8 +274,9 @@ function detail(run, s, d, k) {
   if (lt) facts.push(['light', `${clock(lt.dawn)}–${clock(lt.dusk)}, head torch outside that (sunrise ${clock(lt.rise)}, sunset ${clock(lt.set)})`]);
 
   return `<div class="detail">
-    <div class="strip"><div class="bars">${bars}</div><div class="ticks">${ticks}</div>
-    <div class="cap"><span class="sw h4"></span>dry <span class="sw h2"></span>50/50 <span class="sw h0"></span>wet <span class="sw night"></span>dark · faded = outside your session</div></div>
+    <div class="strip"><div class="hours">${cells}</div><div class="ticks">${ticks}</div>
+    <div class="cap">top: weather (☀︎ sun · ☁︎ cloud · ☂︎ rain · ≡ mist · ☾ night) · bottom: rock
+    (<span class="dot v4"></span>dry <span class="dot v2"></span>50/50 <span class="dot v0"></span>wet) · faded = outside your session</div></div>
     <dl class="facts">${facts.map(([l, t]) => `<dt>${l}</dt><dd>${t}</dd>`).join('')}</dl>
     ${k >= 3 ? '<p class="dim" style="font-size:12px;margin:8px 0 0">This far out the forecast can still change a lot.</p>' : ''}
   </div>`;

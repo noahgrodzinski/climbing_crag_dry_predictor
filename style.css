@@ -109,23 +109,23 @@ select {
 .facts dd { margin: 0; }
 
 .strip { margin-top: 6px; }
-.strip .bars, .strip .ticks { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; }
-.strip .bars span { height: 16px; border-radius: 2px; background: var(--night); }
-.strip .bars span.h4 { background: var(--d4); }
-.strip .bars span.h3 { background: var(--d3); }
-.strip .bars span.h2 { background: var(--d2); }
-.strip .bars span.h1 { background: var(--d1); }
-.strip .bars span.h0 { background: var(--d0); }
-.strip .bars span.out { opacity: 0.4; }
-/* dark hours: dark box with the dryness colour as a strip along the bottom */
-.strip .bars span.night { opacity: 1; outline: 1px solid var(--rule); outline-offset: -1px; box-shadow: inset 0 -4px 0 var(--bc, transparent); background: var(--nightbox); }
-.strip .bars span.dusk { opacity: 1; background: linear-gradient(90deg, var(--bc, var(--night)) 50%, var(--nightbox) 50%); }
-.strip .bars span.h4 { --bc: var(--d4); } .strip .bars span.h3 { --bc: var(--d3); } .strip .bars span.h2 { --bc: var(--d2); }
-.strip .bars span.h1 { --bc: var(--d1); } .strip .bars span.h0 { --bc: var(--d0); }
-.strip .cap .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin: 0 3px 0 6px; }
-.strip .cap .sw:first-child { margin-left: 0; }
-.strip .cap .sw.h4 { background: var(--d4); } .strip .cap .sw.h2 { background: var(--d2); }
-.strip .cap .sw.h0 { background: var(--d0); } .strip .cap .sw.night { background: var(--nightbox); }
+.strip .hours, .strip .ticks { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; }
+.strip .hc {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 3px 0 4px; border-radius: 4px; min-width: 0;
+}
+.strip .hc i {
+  font-style: normal; font-size: 17px; line-height: 18px; height: 18px; font-weight: 700;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "DejaVu Sans", system-ui, sans-serif;
+}
+.strip .hc i .faint { opacity: 0.45; }
+.strip .hc .dot { margin: 0; width: 12px; height: 12px; }
+.strip .hc.out { opacity: 0.4; }
+.strip .hc.night { background: var(--nightbox); color: #d8d8e6; opacity: 1; }
+.strip .hc.night.out { opacity: 0.75; }
+.strip .hc.dusk { background: linear-gradient(180deg, transparent, var(--nightbox)); }
+.cap .dot { width: 10px; height: 10px; margin: 0 2px 0 4px; }
+.strip .ticks { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; }
 .strip .ticks { font-size: 10.5px; color: var(--dim); margin-top: 2px; }
 .strip .ticks span { white-space: nowrap; overflow: visible; }
 .strip .cap { font-size: 11.5px; color: var(--dim); margin-top: 3px; }
