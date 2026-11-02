@@ -19,17 +19,94 @@ const PAST_MODELS = 'ukmo_seamless,ecmwf_ifs025,icon_seamless,gfs_seamless,knmi_
 export const FORECAST_DAYS = 8;
 const PAST_DAYS = 14;
 
-async function getJSON(url, params) {
-  const r = await fetch(`${url}?${new URLSearchParams(params)}`);
-  if (!r.ok) throw new Error(`${new URL(url).host} ${r.status}`);
-  const j = await r.json();
-  return Array.isArray(j) ? j : [j];
+// Open-Meteo occasionally answers 503 "overloaded" / 429; retry briefly before giving up.
+async function getJSON(url, params, tries = 3) {
+  for (let k = 0; ; k++) {
+    const r = await fetch(`${url}?${new URLSearchParams(params)}`).catch(e => ({ ok: false, status: 0, e }));
+    if (r.ok) { const j = await r.json(); return Array.isArray(j) ? j : [j]; }
+    const retryable = r.status === 0 || r.status === 429 || r.status >= 500;
+    if (!retryable || k >= tries - 1) throw new Error(`${new URL(url).host} ${r.status || 'offline'}`);
+    await new Promise(res => setTimeout(res, 800 * 3 ** k));
+  }
+}
+
+// Last good download per region, kept in the browser's Cache Storage (big enough for MBs).
+const CACHE = 'isitdry-wx-v1';
+async function saveCache(region, wx) {
+  try { const c = await caches.open(CACHE); await c.put(`/wx/${region}`, new Response(JSON.stringify(wx))); } catch {}
+}
+async function loadCache(region) {
+  try { const c = await caches.open(CACHE); const r = await c.match(`/wx/${region}`); return r ? await r.json() : null; } catch { return null; }
 }
 
 const near = (pts, c) => pts.reduce((b, k, i) =>
   (k.lat - c.lat) ** 2 + (k.lon - c.lon) ** 2 < (pts[b].lat - c.lat) ** 2 + (pts[b].lon - c.lon) ** 2 ? i : b, 0);
 
-export async function fetchRegion(region, crags) {
+// Live data if possible; otherwise the last good download (if under 6 h old); otherwise a
+// backup built only from the ensemble server, which has stayed up when the main one hasn't.
+export async function fetchRegion(region, crags, key) {
+  try {
+    const wx = await fetchLive(region, crags);
+    saveCache(key, wx);
+    return { ...wx, mode: 'live' };
+  } catch (err) {
+    console.warn('live forecast failed', err);
+    const cached = await loadCache(key);
+    if (cached && Date.now() - cached.fetched < 6 * 3600e3) return { ...cached, mode: 'cached', error: err.message };
+    try { return { ...(await fetchBackup(region, crags)), mode: 'backup', error: err.message }; }
+    catch (e2) {
+      if (cached) return { ...cached, mode: 'cached', error: err.message };
+      throw err;
+    }
+  }
+}
+
+// Backup: per-cluster ensemble data (Met Office MOGREPS-G control run as the "main" forecast,
+// its members for P(dry)), elevation-corrected to each crag; only 3 days of spin-up.
+async function fetchBackup(region, crags) {
+  const cl = region.clusters.map((k, j) => {
+    const mine = crags.filter(c => near(region.clusters, c) === j);
+    return { ...k, alt: mine.length ? Math.round(mine.reduce((a, c) => a + c.alt, 0) / mine.length) : 300 };
+  });
+  const vars = 'precipitation,temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,' +
+    'wind_direction_10m,shortwave_radiation,weather_code,visibility,cloud_cover_low';
+  const ens = await getJSON(ENS_URL, {
+    latitude: cl.map(c => c.lat).join(','), longitude: cl.map(c => c.lon).join(','), elevation: cl.map(c => c.alt).join(','),
+    hourly: vars, models: 'ukmo_global_ensemble_20km', past_days: 3, forecast_days: FORECAST_DAYS,
+    wind_speed_unit: 'ms', timeformat: 'unixtime', timezone: 'GMT',
+  });
+  const det = crags.map(c => {
+    const j = near(region.clusters, c);
+    const h = ens[j].hourly;
+    const hourly = { time: h.time };
+    for (const v of vars.split(',')) hourly[v] = h[v];
+    const lapse = (c.alt - cl[j].alt) * 0.0065;   // °C per m
+    hourly.temperature_2m = h.temperature_2m.map(T => T == null ? null : T - lapse);
+    const dates = [...new Set(h.time.map(u => localParts(u).date))];
+    const daily = { time: [], sunrise: [], sunset: [] };
+    for (const d of dates) {
+      const st = sunTimes(d, c.lat, c.lon);
+      daily.time.push(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 1000 + 43200);
+      daily.sunrise.push(st.rise); daily.sunset.push(st.set);
+    }
+    return { hourly, daily };
+  });
+  const marine = await fetchMarine(crags);
+  return { det, past: null, ens, marine, fetched: Date.now() };
+}
+
+async function fetchMarine(crags) {
+  const tidal = crags.filter(c => c.tidal);
+  if (!tidal.length) return null;
+  return getJSON(MARINE_URL, {
+    latitude: tidal.map(c => c.lat).join(','), longitude: tidal.map(c => c.lon).join(','),
+    hourly: 'sea_level_height_msl,wave_height', cell_selection: 'sea',
+    forecast_days: FORECAST_DAYS, timeformat: 'unixtime', timezone: 'GMT',
+  }).then(r => Object.fromEntries(tidal.map((c, i) => [c.id, r[i].hourly])))
+    .catch(e => { console.warn('marine failed', e); return null; });
+}
+
+async function fetchLive(region, crags) {
   const lat = crags.map(c => c.lat).join(','), lon = crags.map(c => c.lon).join(',');
   const det = getJSON(DET_URL, {
     latitude: lat, longitude: lon, elevation: crags.map(c => c.alt).join(','),
@@ -50,13 +127,7 @@ export async function fetchRegion(region, crags) {
     models: ENS_MODELS, past_days: 1, forecast_days: FORECAST_DAYS,
     timeformat: 'unixtime', timezone: 'GMT',
   }).catch(e => { console.warn('ensemble failed, deterministic only', e); return null; });
-  const tidal = crags.filter(c => c.tidal);
-  const marine = tidal.length ? getJSON(MARINE_URL, {
-    latitude: tidal.map(c => c.lat).join(','), longitude: tidal.map(c => c.lon).join(','),
-    hourly: 'sea_level_height_msl,wave_height', cell_selection: 'sea',
-    forecast_days: FORECAST_DAYS, timeformat: 'unixtime', timezone: 'GMT',
-  }).then(r => Object.fromEntries(tidal.map((c, i) => [c.id, r[i].hourly])))
-    .catch(e => { console.warn('marine failed', e); return null; }) : null;
+  const marine = fetchMarine(crags);
   return { det: await det, past: await past, ens: await ens, marine: await marine, fetched: Date.now() };
 }
 

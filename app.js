@@ -198,7 +198,7 @@ function renderCrag({ runs, days }) {
   </div><div class="days">`;
   days.forEach((d, k) => {
     const s = ss[k];
-    if (!s) return;
+    if (!s || s.p == null) return;   // beyond the forecast (backup mode is shorter)
     const [e, lab] = wxEmoji(s);
     const open = ui.openDay === d;
     const cond = condWord(s.grip);
@@ -403,8 +403,11 @@ function renderHowto() {
 
 function renderStatus(msg) {
   if (msg) { $('status').textContent = msg; return; }
-  const t = new Date(cache[ui.region].fetched).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  $('status').innerHTML = `Updated ${t} · <button class="linkish" id="refresh">refresh</button>`;
+  const d = cache[ui.region];
+  const t = new Date(d.fetched).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const note = d.mode === 'cached' ? ` · <span class="v1">weather server busy, showing the forecast from ${t}</span>`
+    : d.mode === 'backup' ? ' · <span class="v1">main weather server busy, using a backup forecast (a bit less accurate)</span>' : '';
+  $('status').innerHTML = `Updated ${t}${note} · <button class="linkish" id="refresh">refresh</button>`;
   $('refresh').onclick = () => load(true);
 }
 
@@ -455,13 +458,13 @@ document.addEventListener('click', e => {
 async function load(force = false) {
   const region = ui.region;
   const c = cache[region];
-  if (c && !force && Date.now() - c.fetched < 30 * 60e3) { renderStatus(); renderData(); return; }
+  if (c && !force && c.mode === 'live' && Date.now() - c.fetched < 30 * 60e3) { renderStatus(); renderData(); return; }
   renderStatus('Loading forecast…');
   try {
     const crags = CRAGS.filter(x => x.region === region);
-    const wx = await fetchRegion(REGIONS[region], crags);
+    const wx = await fetchRegion(REGIONS[region], crags, region);
     const runs = runRegion(REGIONS[region], crags, wx);
-    cache[region] = { runs, days: dayList(runs[0]), fetched: wx.fetched };
+    cache[region] = { runs, days: dayList(runs[0]), fetched: wx.fetched, mode: wx.mode };
     if (region !== ui.region) return;
     renderStatus();
     renderData();
