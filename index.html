@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>isitdry · peak grit</title>
+<meta name="description" content="Is the grit dry? Week-ahead dryness, friction and rock-damage forecast for Peak District and Staffordshire gritstone crags.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+<pre class="banner">isitdry <span class="dim">— peak grit conditions, 8 days out</span></pre>
+
+<div class="cmd" id="cmd"></div>
+<div class="status dim" id="status">fetching open-meteo…</div>
+
+<table id="grid" aria-label="Dryness forecast by crag and day"></table>
+
+<pre class="legend dim" id="legend"></pre>
+
+<details class="help" id="help">
+<summary>$ isitdry --help</summary>
+<div class="helpbody">
+<p><b>what the numbers mean</b><br>
+Each cell is P(dry): the share of ~110 forecast ensemble members (ECMWF, ICON, Met Office)
+in which the rock is dry for at least 75% of your session hours.
+<span class="ok">≥65 dry</span> · <span class="mid">35–64 maybe</span> · <span class="bad">&lt;35 wet</span>.
+Click a crag for hour-by-hour detail.</p>
+
+<p><b>model</b><br>
+Each face has two moisture stores, stepped hourly from 14 days back:
+a <i>surface film</i> that rain and condensation fill and evaporation empties, and a slow
+<i>pore store</i> that soaks up some rain, drains over a few days and wicks back to the
+surface (why grit stays green and greasy after a wet week).
+Evaporation is Penman for a wet surface, driven by sunlight on the actual face
+(vertical plane at the crag's aspect, sun position by hour), wind at the face (reduced by shelter)
+and vapour-pressure deficit. Rock temperature lags air temperature and warms in sun;
+when the dew point is above rock temperature it condenses (“sweating” grit).</p>
+
+<p><b>friction</b> — dry-rock grip from rock temp, humidity, dew point and breeze.
+cold, dry and breezy = prime; warm, humid, still or sweating = greasy.</p>
+
+<p><b>rock</b> — damage risk. <span class="bad">wet</span>: wet grit is weaker and holds/flakes snap — don't.
+<span class="mid">saturated</span>: surface may be dry but the pores are still full after prolonged rain
+(or wet rock near freezing); go gentle on flakes, soft holds and anything friable.</p>
+
+<p><b>caveats</b> — v1, hand-tuned, not yet calibrated against observations.
+It doesn't know about green streaks, seepage lines or a single damp route on an otherwise dry crag.
+Forecast skill drops after ~3 days; by day 5–7 treat it as a trend.
+Weather: <a href="https://open-meteo.com">open-meteo.com</a> (CC BY 4.0). Crag info: UKC.</p>
+</div>
+</details>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
