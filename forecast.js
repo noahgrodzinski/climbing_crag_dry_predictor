@@ -9,7 +9,7 @@
 //             from the current rock state, giving P(dry) and rain chances.
 // Tides/waves: Open-Meteo marine API, for tidal sea-cliff sectors only.
 
-import { initState, step, faceIrradiance, friction, dewPoint, sunTimes, ROCK } from './model.js';
+import { initState, step, faceIrradiance, friction, dewPoint, sunTimes, fogLevel, ROCK } from './model.js';
 
 const DET_URL = 'https://api.open-meteo.com/v1/forecast';
 const ENS_URL = 'https://ensemble-api.open-meteo.com/v1/ensemble';
@@ -34,7 +34,7 @@ export async function fetchRegion(region, crags) {
   const det = getJSON(DET_URL, {
     latitude: lat, longitude: lon, elevation: crags.map(c => c.alt).join(','),
     hourly: 'precipitation,temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,' +
-      'wind_direction_10m,shortwave_radiation,weather_code',
+      'wind_direction_10m,shortwave_radiation,weather_code,visibility,cloud_cover_low',
     daily: 'sunrise,sunset',
     past_days: PAST_DAYS, forecast_days: FORECAST_DAYS,
     wind_speed_unit: 'ms', timeformat: 'unixtime', timezone: 'Europe/London',
@@ -105,8 +105,12 @@ export function runRegion(region, crags, wx) {
         T: fill(h.temperature_2m, i), RH: fill(h.relative_humidity_2m, i),
         U: fill(h.wind_speed_10m, i), gust: fill(h.wind_gusts_10m, i),
         dir: fill(h.wind_direction_10m, i), G: fill(h.shortwave_radiation, i),
-        code: fill(h.weather_code, i),
+        code: fill(h.weather_code, i), vis: fill(h.visibility, i), low: fill(h.cloud_cover_low, i),
       };
+      // The multi-model median drops drizzle; keep the main model's drizzle when it's murky.
+      const drizzle = x.code >= 51 && x.code <= 57 && x.RH >= 95;
+      if (i <= nowIdx && drizzle) x.P = Math.max(x.P, fill(h.precipitation, i));
+      x.fog = fogLevel(x);
       const fi = faceIrradiance(x.G, t[i], c.lat, c.lon, c.aspect_deg, c.shade_trees);
       x.gt = fi.gt; x.beam = fi.beam;
       const d = step(s, x, cragParams(c));
@@ -131,7 +135,10 @@ export function runRegion(region, crags, wx) {
           const base = det[i].x;
           const fi = faceIrradiance(m.G[j], t[i], c.lat, c.lon, c.aspect_deg, c.shade_trees);
           rain[i] = m.P[j];
-          st[i] = step(ms, { P: m.P[j], T: base.T, RH: m.RH?.[j] ?? base.RH, U: base.U, gt: fi.gt }, cragParams(c)).state;
+          const RH = m.RH?.[j] ?? base.RH;
+          // Mist only where this member is also near-saturated.
+          const fog = RH >= 96 ? base.fog : 0;
+          st[i] = step(ms, { P: m.P[j], T: base.T, RH, U: base.U, gt: fi.gt, fog }, cragParams(c)).state;
         }
         mem.push({ st, rain, valid });
       }
@@ -253,6 +260,7 @@ export function summarise(run, date, [h0, h1]) {
     wind, gust, dir, faceWind, rh: mean(e => e.x.RH),
     tmin: Math.min(...det.map(e => e.x.T)), tmax: Math.max(...det.map(e => e.x.T)),
     codes, sunny, sweat: det.some(e => e.d.sweat), seeping: satHrs.length > 0,
+    fogH: det.filter(e => e.x.fog >= 0.5).length,
     hours, tide: run.marine ? tides(run, date) : null,
   };
 }

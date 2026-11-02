@@ -31,9 +31,9 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 const VERDICTS = [
   { min: 0.8, v: 4, word: 'Dry', dot: '●' },
-  { min: 0.6, v: 3, word: 'Probably dry', dot: '◕' },
-  { min: 0.4, v: 2, word: 'Maybe', dot: '◑' },
-  { min: 0.2, v: 1, word: 'Probably wet', dot: '◔' },
+  { min: 0.6, v: 3, word: 'Should be dry', dot: '◕' },
+  { min: 0.4, v: 2, word: '50/50', dot: '◑' },
+  { min: 0.2, v: 1, word: 'Probably damp', dot: '◔' },
   { min: -1, v: 0, word: 'Wet', dot: '○' },
 ];
 const verdict = p => p == null ? { v: 2, word: 'No data', dot: '·' } : VERDICTS.find(x => p >= x.min);
@@ -41,6 +41,7 @@ const dotHTML = p => { const x = verdict(p); return `<span class="dot v${x.v}" a
 const verdictHTML = p => { const x = verdict(p); return `${dotHTML(p)}<span class="verdict v${x.v}">${x.word}</span>`; };
 
 const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+const WINDADJ = ['northerly', 'north-easterly', 'easterly', 'south-easterly', 'southerly', 'south-westerly', 'westerly', 'north-westerly'];
 const ARROW = ['↓', '↙', '←', '↖', '↑', '↗', '→', '↘'];   // points where the wind blows TO
 const oct = d => Math.round((((d % 360) + 360) % 360) / 45) % 8;
 const angDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
@@ -54,9 +55,10 @@ const clock = u => {
 
 const hm = u => { const { hour, min } = localParts(u); return `${hour % 12 || 12}:${String(min).padStart(2, '0')}`; };
 
-const windWord = k => k < 8 ? 'calm' : k < 20 ? 'light wind' : k < 30 ? 'breezy' : k < 40 ? 'windy' : 'very windy';
-const airWord = rh => rh < 65 ? 'dry air' : rh < 80 ? 'fairly dry air' : rh < 90 ? 'humid' : 'very humid';
-const gripWord = f => f == null ? null : f > 0.8 ? 'great' : f > 0.6 ? 'good' : f > 0.4 ? 'okay' : f > 0.2 ? 'greasy' : 'poor';
+const windWord = k => k < 8 ? 'still' : k < 20 ? 'light breeze' : k < 30 ? 'breezy' : k < 45 ? 'windy' : 'blowing a hoolie';
+const airWord = rh => rh < 65 ? 'dry' : rh < 80 ? 'fairly dry' : rh < 90 ? 'humid' : 'muggy';
+const condWord = f => f == null ? null : f > 0.8 ? 'prime' : f > 0.6 ? 'good' : f > 0.4 ? 'average' : f > 0.2 ? 'greasy' : 'minging';
+const tempWord = t => t < 3 ? 'baltic' : t < 9 ? 'cold' : t < 15 ? 'cool' : t < 20 ? 'mild' : 'warm';
 const rainWord = mm => mm < 0.5 ? 'a few drops of' : mm < 3 ? 'light' : mm < 10 ? 'moderate' : 'heavy';
 
 function wxEmoji(s) {
@@ -64,7 +66,7 @@ function wxEmoji(s) {
   if (s.codes.some(c => c >= 95)) return ['⛈️', 'thunder possible'];
   if (s.codes.some(c => (c >= 71 && c <= 77) || c === 85 || c === 86)) return ['🌨️', 'snow'];
   if (s.rainChance >= 0.3) return ['🌦️', 'showers possible'];
-  if (s.codes.filter(c => c === 45 || c === 48).length > s.codes.length / 2) return ['🌫️', 'fog'];
+  if (s.fogH > s.codes.length / 3) return ['🌫️', 'mist / low cloud'];
   if (s.sunny > 0.5) return ['☀️', 'sunny'];
   if (s.codes.filter(c => c >= 3).length / s.codes.length > 0.6) return ['☁️', 'cloudy'];
   return s.sunny > 0.2 ? ['🌤️', 'sunny spells'] : ['⛅', 'some sun'];
@@ -89,12 +91,12 @@ function whenText(s) {
 
 function rockText(s) {
   if (s.rockState === 'wet') return s.fragile
-    ? ['🚫', "<b>wet — don't climb.</b> Wet gritstone is weaker and holds can snap."]
-    : ['🚫', '<b>wet</b> — slippery, not worth it.'];
+    ? ['v0', "<b>wet — leave it.</b> Wet grit is weak; holds and flakes snap."]
+    : ['v0', '<b>wet</b> — slippery, not worth it.'];
   if (s.rockState === 'soaked') return s.fragile
-    ? ['⚠️', '<b>damp inside</b> after lots of rain — go gentle on flakes and soft holds.']
-    : ['⚠️', '<b>seepage likely</b> after lots of rain — some lines may be wet.'];
-  return ['✅', '<b>fine to climb.</b>'];
+    ? ['v2', '<b>saturated</b> after a wet spell — may look dry but go easy on flakes and soft holds.']
+    : ['v2', '<b>seeping</b> after a wet spell — drainage lines and cracks likely wet.'];
+  return ['v4', '<b>dry, good to go.</b>'];
 }
 
 // ---------- rendering ----------
@@ -153,12 +155,12 @@ function renderOverview({ runs, days }) {
     html += `<div class="card">
       <div class="day">${shortDay(d, k)} <span class="dim">${dateNum(d).split(' ')[0]}</span></div>
       <div class="row"><span class="dot v${v.v}" aria-hidden="true"></span><b class="v${v.v}">${status}</b></div>
-      <div class="row">${em(e, lab)} ${Math.round(avg(s => s.tmax))}° · ${em('☔', 'rain chance')} ${Math.round(avg(s => s.rainChance) * 10) * 10}%</div>
-      <div class="row">${em('💨')} ${windWord(avg(s => s.wind))}</div>
+      <div class="row">${em(e, lab)} ${Math.round(avg(s => s.tmax))}° · rain ${Math.round(avg(s => s.rainChance) * 10) * 10}%</div>
+      <div class="row dim">${windWord(avg(s => s.wind))}${avg(s => s.fogH) >= 2 ? ' · clag' : ''}</div>
       <div class="best">${top && top.sc >= 0.35
         ? `Best bet:<br><button data-pick="${top.r.crag.id}">${esc(top.r.crag.short)}</button>${why ? `<br><span class="dim">${esc(why)}</span>` : ''}`
         : '<span class="dim">Nowhere looks dry</span>'}</div>
-      ${lt ? `<div class="light">${em('🌅', 'sunrise to sunset')} ${hm(lt.rise)}–${hm(lt.set)}<br>light ${hm(lt.dawn)}–${hm(lt.dusk)}</div>` : ''}
+      ${lt ? `<div class="light">sun ${hm(lt.rise)}–${hm(lt.set)}<br>light ${hm(lt.dawn)}–${hm(lt.dusk)}</div>` : ''}
     </div>`;
   });
   $('overview').innerHTML = html + '</div>';
@@ -169,8 +171,8 @@ function pickWhy({ s }, ss) {
   const avgFace = ss.reduce((a, x) => a + x.faceWind, 0) / ss.length;
   if (s.wind >= 25 && s.faceWind < 0.75 * avgFace) bits.push('out of the wind');
   if (s.sunH >= 2) bits.push('sun on the rock');
-  if ((s.grip ?? 0) > 0.8) bits.push('great grip');
-  if (!bits.length && s.p >= 0.8) bits.push('dries fast');
+  if ((s.grip ?? 0) > 0.8) bits.push('prime conditions');
+  if (!bits.length && s.p >= 0.8) bits.push('quick drying');
   return bits.slice(0, 2).join(', ');
 }
 
@@ -190,12 +192,12 @@ function renderCrag({ runs, days }) {
     if (!s) return;
     const [e, lab] = wxEmoji(s);
     const open = ui.openDay === d;
-    const grip = gripWord(s.grip);
+    const cond = condWord(s.grip);
     html += `<div class="dayrow${open ? ' open' : ''}">
       <button data-day="${d}" aria-expanded="${open}">
         <span class="dname">${dayName(d, k)}<small>${dateNum(d)}${isWeekend(d) ? ' · wknd' : ''}</small></span>
-        <span class="line">${verdictHTML(s.p)}<br><span class="sub">${whenText(s)}${grip && s.rockState !== 'wet' ? ` · ${grip} grip` : ''}${c.weekday_closed && !isWeekend(d) ? ' · ⚠︎ range may be firing' : ''}</span></span>
-        <span class="wxcol">${em(e, lab)} ${Math.round(s.tmax)}°<br><span class="sub">${s.wind >= 30 ? em('💨') + ' ' : ''}${Math.round(s.wind)} km/h</span></span>
+        <span class="line">${verdictHTML(s.p)}<br><span class="sub">${whenText(s)}${cond && s.rockState !== 'wet' ? ` · ${cond} conditions` : ''}${c.weekday_closed && !isWeekend(d) ? ' · ⚠︎ range may be firing' : ''}</span></span>
+        <span class="wxcol">${em(e, lab)} ${Math.round(s.tmax)}°<br><span class="sub">${Math.round(s.wind)} km/h</span></span>
       </button>
       ${open ? detail(run, s, d, k) : ''}
     </div>`;
@@ -213,49 +215,55 @@ function detail(run, s, d, k) {
     const h = s.hours.find(x => x.hour === hr);
     const p = h ? run.pDry[h.i] : null;
     const t = h ? run.t[h.i] : null;
-    const night = lt && t != null && (t + 3600 <= lt.dawn || t >= lt.dusk);
-    const cls = [p != null ? 'h' + verdict(p).v : '', hr < h0 || hr >= h1 ? 'out' : '', night ? 'night' : ''].join(' ');
-    bars += `<span class="${cls}" title="${ampm(hr)}: ${p == null ? 'no data' : verdict(p).word}${night ? ' (dark)' : ''}"></span>`;
+    // fraction of this hour that is dark (before first light / after last light)
+    let dark = 0;
+    if (lt && t != null) {
+      dark = (Math.max(0, Math.min(t + 3600, lt.dawn) - t) + Math.max(0, t + 3600 - Math.max(t, lt.dusk))) / 3600;
+    }
+    const v = p != null ? verdict(p).v : null;
+    const cls = [v != null ? 'h' + v : '', hr < h0 || hr >= h1 ? 'out' : '', dark >= 0.75 ? 'night' : dark > 0.25 ? 'dusk' : ''].join(' ');
+    const fog = h && run.det[h.i].x.fog >= 0.5 ? ', clag' : '';
+    bars += `<span class="${cls}" title="${ampm(hr)}: ${p == null ? 'no data' : verdict(p).word}${fog}${dark >= 0.75 ? ', dark' : dark > 0.25 ? ', getting dark' : ''}"></span>`;
     ticks += `<span>${hr % 3 === 0 ? ampm(hr) : ''}</span>`;
   }
 
   const facts = [];
   const rc = Math.round(s.rainChance * 10) * 10;
-  facts.push(['☔', s.rainChance < 0.1 ? 'Rain: <b>unlikely</b> while you climb.'
-    : `Rain: <b>${rc}% chance</b> while you climb${s.rainAmt >= 0.2 ? `, ${rainWord(s.rainAmt).replace(' of', '')} (~${s.rainAmt.toFixed(1)} mm)` : ''}.`]);
+  facts.push(['rain', s.rainChance < 0.1 ? '<b>unlikely</b> while you\'re out'
+    : `<b>${rc}% chance</b> while you're out${s.rainAmt >= 0.2 ? `, ${rainWord(s.rainAmt).replace(' of', '')} (~${s.rainAmt.toFixed(1)} mm)` : ''}`]);
+  if (s.fogH) facts.push(['clag', `<b>mist / low cloud for ~${s.fogH}h</b> — soaks the rock even without proper rain`]);
   if (s.rain48 >= 0.3) {
     const lp = s.lastRain ? localParts(s.lastRain) : null;
     const when = lp ? `, last at ${ampm(lp.hour)}${lp.date !== d ? ' ' + fmt(lp.date, { weekday: 'short' }) : ''}` : '';
-    facts.push(['🌧️', `Before: ${rainWord(s.rain48)} rain in the 2 days before (${s.rain48.toFixed(1)} mm${when}).`]);
-  } else facts.push(['🌤️', 'Before: <b>dry</b> for the 2 days before.']);
-  facts.push(['☀️', s.sunH
-    ? `Sun on the rock: about <b>${s.sunH} hour${s.sunH > 1 ? 's' : ''}</b> from ${clock(s.sunFirst)}, helps drying.`
-    : `Sun on the rock: <b>little or none</b>${angDiff(c.aspect_deg, 180) > 120 ? ' — this face rarely gets direct sun' : ''}.`]);
+    facts.push(['before', `${rainWord(s.rain48)} rain in the previous 48h (${s.rain48.toFixed(1)} mm${when})`]);
+  } else facts.push(['before', '<b>dry</b> for the previous 48h']);
+  facts.push(['sun', s.sunH
+    ? `on the rock for ~<b>${s.sunH}h</b> from ${clock(s.sunFirst)}`
+    : `<b>little or none</b> on the rock${angDiff(c.aspect_deg, 180) > 120 ? ' (this face rarely gets any)' : ''}`]);
   const o = oct(s.dir), rel = angDiff(s.dir, c.aspect_deg);
-  facts.push(['💨', `Wind: <b>${windWord(s.wind)}</b>, ${Math.round(s.wind)} km/h from the ${COMPASS[o]} ${ARROW[o]}` +
-    `${s.gust >= 45 ? `, gusts ${Math.round(s.gust)}` : ''}` +
-    `${s.wind >= 20 && rel < 60 ? ' — blowing straight onto the face' : s.wind >= 20 && rel > 120 ? ' — crag is sheltered from it' : ''}` +
-    `${s.wind >= 15 ? '. Helps drying.' : '.'}`]);
-  facts.push(['💧', `Air: <b>${airWord(s.rh)}</b> (${Math.round(s.rh)}% humidity)` +
-    `${s.rh >= 92 ? ' — slow drying, rock feels greasy' : s.rh >= 82 ? ' — slows drying' : s.rh < 70 ? ' — good for drying and grip' : ''}.`]);
-  facts.push(['🌡️', `Temperature: ${Math.round(s.tmin)}–${Math.round(s.tmax)}°C${s.tmax < 4 ? ', cold fingers' : s.tmax > 20 ? ', warm for friction' : ''}.`]);
-  if (s.sweat) facts.push(['💦', 'Rock may “sweat”: damp air condensing on cold rock, usually early on.']);
-  if (s.grip != null && s.rockState !== 'wet') facts.push(['🧗', `Grip: <b>${gripWord(s.grip)}</b> on dry rock.`]);
-  const rd = rockText(s);
-  facts.push([rd[0], `Rock: ${rd[1]}`]);
+  facts.push(['wind', `<b>${windWord(s.wind)}</b>, ${Math.round(s.wind)} km/h ${WINDADJ[o]} ${ARROW[o]}` +
+    `${s.gust >= 45 ? `, gusting ${Math.round(s.gust)}` : ''}` +
+    `${s.wind >= 20 && rel < 60 ? ' — straight onto the face' : s.wind >= 20 && rel > 120 ? ' — crag is in the lee' : ''}`]);
+  facts.push(['air', `<b>${airWord(s.rh)}</b>, ${Math.round(s.rh)}% humidity` +
+    `${s.rh >= 92 ? ' — slow drying, greasy' : s.rh >= 82 ? ' — slows drying' : s.rh < 70 ? ' — good for drying and friction' : ''}`]);
+  facts.push(['temp', `<b>${tempWord(s.tmax)}</b>, ${Math.round(s.tmin)}–${Math.round(s.tmax)}°C${s.tmax < 4 ? ' — numb fingers' : s.tmax > 18 && s.fragile ? ' — too warm for good grit friction' : ''}`]);
+  if (s.sweat) facts.push(['sweat', 'rock may be sweating — damp air condensing on cold rock, usually early on']);
+  if (s.grip != null && s.rockState !== 'wet') facts.push(['friction', `<b>${condWord(s.grip)}</b> when dry`]);
+  const [rc2, rt] = rockText(s);
+  facts.push(['rock', `<span class="${rc2}">${rt}</span>`]);
   if (s.tide) {
     const ts = type => s.tide.ext.filter(x => x.type === type).map(x => '~' + ampm(localParts(x.t).hour)).join(' & ') || '–';
     const w = s.tide.wave;
-    facts.push(['🌊', `Tide: low ${ts('low')}, high ${ts('high')}. Waves <b>${w < 0.8 ? 'small' : w < 1.5 ? 'moderate' : w < 2.5 ? 'big' : 'very big'}</b> (${w.toFixed(1)} m)` +
-      `${c.tide_note ? `. ${esc(c.tide_note)}` : ''}.`]);
+    facts.push(['tide', `low ${ts('low')}, high ${ts('high')}; swell <b>${w < 0.8 ? 'small' : w < 1.5 ? 'moderate' : w < 2.5 ? 'big' : 'huge'}</b> (${w.toFixed(1)} m)` +
+      `${c.tide_note ? `. ${esc(c.tide_note)}` : ''}`]);
   }
-  if (lt) facts.push(['🌅', `Light: ${clock(lt.dawn)} to ${clock(lt.dusk)} (sunrise ${clock(lt.rise)}, sunset ${clock(lt.set)}).`]);
+  if (lt) facts.push(['light', `${clock(lt.dawn)}–${clock(lt.dusk)}, head torch outside that (sunrise ${clock(lt.rise)}, sunset ${clock(lt.set)})`]);
 
   return `<div class="detail">
     <div class="strip"><div class="bars">${bars}</div><div class="ticks">${ticks}</div>
-    <div class="cap">Each bar is one hour: green dry · amber maybe · red wet. Faded = outside your session, faint = dark.</div></div>
-    <ul class="facts">${facts.map(([e, t]) => `<li>${em(e)}<span>${t}</span></li>`).join('')}</ul>
-    ${k >= 3 ? '<p class="dim" style="font-size:12px;margin:8px 0 0">This far ahead the forecast can still change a lot.</p>' : ''}
+    <div class="cap"><span class="sw h4"></span>dry <span class="sw h2"></span>50/50 <span class="sw h0"></span>wet <span class="sw night"></span>dark · faded = outside your session</div></div>
+    <dl class="facts">${facts.map(([l, t]) => `<dt>${l}</dt><dd>${t}</dd>`).join('')}</dl>
+    ${k >= 3 ? '<p class="dim" style="font-size:12px;margin:8px 0 0">This far out the forecast can still change a lot.</p>' : ''}
   </div>`;
 }
 
@@ -273,24 +281,26 @@ function renderAll({ runs, days }) {
 }
 
 function renderHowto() {
-  const meaning = ['nearly every forecast keeps it wet', 'most forecasts have it wet',
-    'forecasts disagree, could go either way', 'most forecasts have it dry', 'nearly every forecast has it dry'];
+  const meaning = ['nearly every forecast has it wet', 'most forecasts have it damp or wet',
+    'forecasts split — could go either way', 'most forecasts have it dry', 'nearly every forecast has it dry'];
   $('howto').innerHTML = `
-    <p>Each day says how likely the rock is to be dry for most of the hours you picked under <b>When</b>.
-    A fuller circle means drier rock:</p>
+    <p>Each day is the chance the rock is dry for most of the hours you picked under <b>When</b>.
+    Fuller circle = drier:</p>
     <ul class="key">${[...VERDICTS].reverse().map(x => `<li><span class="dot v${x.v}"></span> <b class="v${x.v}">${x.word}</b> — ${meaning[x.v]}</li>`).join('')}</ul>
-    <p>Tap a day for an hour-by-hour bar and the reasons behind it:</p>
-    <ul class="key">
-      <li>☔ chance of rain while you climb</li>
-      <li>☀️ hours of sun actually on the rock face, not just in the sky</li>
-      <li>💨 wind dries rock quickly; the arrow shows which way it blows</li>
-      <li>💧 humidity: muggy air dries rock slowly and feels greasy</li>
-      <li>🧗 grip: best when cool, dry and breezy; worst when warm and muggy</li>
-      <li>✅ ⚠️ 🚫 is the rock OK to climb? Wet gritstone is weaker and holds can break</li>
-      <li>🌊 tide times and wave size for sea cliffs</li>
-      <li>🌅 sunrise/sunset; “light” is when you can climb without a head torch</li>
-    </ul>
-    <p><b>Best bet</b> picks the crag most likely to be dry with good grip, and avoids faces
+    <p><b>Conditions</b> is friction on dry rock: <b>prime</b> (cold, dry, breezy) → good → average →
+    <b>greasy</b> (mild and humid) → <b>minging</b>.</p>
+    <p>Tap a day for the hourly bar (dark boxes = night) and the details:</p>
+    <dl class="facts">
+      <dt>rain</dt><dd>chance of rain while you're out</dd>
+      <dt>clag</dt><dd>mist / low cloud — wets moorland edges even when it isn't really raining</dd>
+      <dt>sun</dt><dd>hours of sun actually on the face, not just in the sky</dd>
+      <dt>wind</dt><dd>dries rock fast; arrow shows where it's blowing to; "in the lee" = sheltered</dd>
+      <dt>air</dt><dd>humidity: muggy air dries rock slowly and makes it greasy</dd>
+      <dt>rock</dt><dd>wet grit is weak and holds snap, so leave it; "saturated" or "seeping" = damp inside after a wet spell</dd>
+      <dt>tide</dt><dd>approximate tide times and swell for sea cliffs</dd>
+      <dt>light</dt><dd>first to last light; head torch outside that</dd>
+    </dl>
+    <p><b>Best bet</b> is the crag most likely to be dry with the best conditions, avoiding faces
     taking the full force of a strong wind.</p>`;
 }
 

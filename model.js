@@ -84,7 +84,19 @@ export function faceIrradiance(ghi, unix, lat, lon, aspect, shade = 1) {
 
 export function initState() { return { W: 0, D: 0, Tr: null }; }
 
-// One hour. `x` = { P, T, RH, U, gt }, crag = { shelter, green, rock }.
+// How much the crag is sitting in mist / low cloud this hour (0..1), from model visibility,
+// humidity, low cloud and fog/drizzle weather codes. Moorland edges catch "clag" that
+// barely registers as rain but soaks the rock.
+export function fogLevel(x) {
+  const code = x.code ?? 0, vis = x.vis ?? 1e5, low = x.low ?? 0;
+  if (vis < 200 || ((code === 45 || code === 48) && x.RH >= 97)) return 1;
+  if (vis < 1000) return 0.7;
+  if (x.RH >= 98 && low >= 90) return 0.5;
+  if (code >= 51 && code <= 57 && x.RH >= 95) return 0.5;   // drizzle in the murk
+  return 0;
+}
+
+// One hour. `x` = { P, T, RH, U, gt, fog }, crag = { shelter, green, rock }.
 // Mutates `s`, returns diagnostics for this hour.
 export function step(s, x, crag) {
   const r = ROCK[crag.rock] || ROCK.grit;
@@ -108,18 +120,21 @@ export function step(s, x, crag) {
   // Condensation when the air's vapour pressure exceeds saturation at rock temp.
   const cond = Math.max(0, hc * (ea - es(s.Tr)) / GAMMA / LAMBDA * 3600);
 
+  // Mist/cloud droplets impacting on the face; more with wind (fog interception).
+  const dep = (x.fog ?? 0) * (0.03 + 0.025 * u);
+
   // Deep store: soaks up some rain, drains, and wicks back to the surface when full.
   const fill = s.D / r.Dmax;
   const soak = r.kin * x.P * (1 - fill);
   const wick = r.kw * Math.max(0, fill - 0.5) * 2 * crag.green * (SEEP[crag.seepage] ?? 1);
   s.D = Math.max(0, s.D + soak - s.D / r.tauD - wick - 0.1 * E * fill);
 
-  s.W = Math.min(r.Wmax, s.W + x.P + cond + wick);
+  s.W = Math.min(r.Wmax, s.W + x.P + cond + wick + dep);
   s.W = Math.max(0, s.W - E);
 
   const w = s.W / r.Wmax;
   const state = x.P >= THRESH.rain || w >= THRESH.damp ? 2 : w >= THRESH.dry ? 1 : 0;
-  return { state, w, fill: s.D / r.Dmax, E, cond, Tr: s.Tr, u, sweat: cond > 0.005 };
+  return { state, w, fill: s.D / r.Dmax, E, cond, Tr: s.Tr, u, sweat: cond > 0.005, fog: (x.fog ?? 0) > 0 };
 }
 
 // Grit friction 0..1 from rock temp, humidity and breeze (only meaningful when dry).
@@ -132,7 +147,7 @@ export function friction(h, x) {
   f -= 0.3 * clamp((Td - 8) / 8);
   f += 0.1 * Math.min(h.u, 4) / 4;
   if (h.Tr < 2) f -= 0.15;
-  if (h.sweat) f -= 0.3;
+  if (h.sweat || h.fog) f -= 0.3;
   return clamp(f);
 }
 
